@@ -1,0 +1,60 @@
+@'
+# --- Python / build ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.dist/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+
+# --- IDEs / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+
+# --- App artifacts / local data ---
+out/
+Agent_Logs/
+logs/
+*.log
+*.tmp
+*.trace.json
+*.trace
+*.srt
+*.mp3
+*.wav
+*.mp4
+
+# --- Models / checkpoints / heavy data ---
+checkpoints/
+weights/
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# --- RAG / databases ---
+*.db
+*.sqlite
+*.sqlite3
+news.db
+
+# --- Secrets / config (keep out of Git) ---
+keys.ini
+.env
+.env.*
+'@ | Set-Content -Encoding UTF8 .gitignore
+
+exports/
+orchestrator_out/
