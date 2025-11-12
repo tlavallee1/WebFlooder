@@ -1,0 +1,133 @@
+{
+  "sources": {
+    "sources_enabled": false,
+    "src_guardian": true,
+    "src_gdelt": true,
+    "src_youtube": true,
+    "src_rss": true
+  },
+  "global": {
+    "topics": "\"Donald Trump\";\"President Trump\"",
+    "from": "2025-11-12",
+    "to": "2025-11-12",
+    "weeks": "1 day",
+    "target_count": 50,
+    "lang": "Any"
+  },
+  "guardian": {
+    "section": "All sections",
+    "page_size": 35
+  },
+  "gdelt": {
+    "slice_days": 3,
+    "per_slice_cap": 20,
+    "sort": "DateDesc",
+    "timeout": 20,
+    "allow_http": true,
+    "fetch_body": true
+  },
+  "youtube": {
+    "mode": "search",
+    "ident": "",
+    "max": 20,
+    "lang": "Any",
+    "fetch_captions": true
+  },
+  "rss": {
+    "feeds": "http://feeds.bbci.co.uk/news/world/rss.xml;https://www.npr.org/rss/rss.php?id=1001;https://rss.cnn.com/rss/cnn_us.rss;https://www.cbsnews.com/latest/rss/main;https://news.yahoo.com/rss",
+    "max_items": 30,
+    "fetch_body": true,
+    "fulltext_pass": true
+  },
+  "prep": {
+    "prep_run": true,
+    "min_words": 100,
+    "min_chars": 250,
+    "chunk_chars": 1500,
+    "make_snippets": true,
+    "index_refresh": true,
+    "do_vectorize": false,
+    "batch": 64,
+    "model": "text-embedding-3-large"
+  },
+  "rag": {
+    "enable": true,
+    "model": "text-embedding-3-large",
+    "batch": 64,
+    "recompute": false,
+    "date_from": "",
+    "date_to": "",
+    "topics_any": ""
+  },
+  "generate": {
+    "enabled": true,
+    "blog_cfg": {
+      "topic": "trump is a dick",
+      "author": "Unit Tester",
+      "political_party": "Progressive Democrat",
+      "political_party_notes": "Test notes",
+      "tags": [],
+      "num_subtasks": 3,
+      "queries_per_subtask": 3,
+      "drafting_model": "gpt-4o",
+      "retrieval_model": "text-embedding-3-large",
+      "temperature": 0.5,
+      "db_path": "news.db",
+      "profanity_level": "clean",
+      "include_social": true,
+      "auto_topic": false,
+      "auto_days": 1,
+      "purpose": "Mobilize action (petitions, calls, votes)",
+      "stance_strength": "Strongly one-sided, tiny caveats if unavoidable",
+      "lines_you_wont_cross": "no hate language or smears",
+      "persona": "Sharp prosecutor / cross-examiner",
+      "persona_other": "",
+      "humor_level": "Light wit",
+      "heat_level": "Spicy and confrontational",
+      "post_length": "900",
+      "preferred_structure": "",
+      "must_have_sections": "",
+      "freshness_requirement": "Mix: freshest for news, stable primers for context",
+      "numbers_to_prioritize": "All of the above",
+      "citation_style": "Footnote-like superscripts",
+      "openings": "",
+      "devices": "Rhetorical questions, Short punchy sentences, Bullet callouts",
+      "fav_avoid": "",
+      "legal_guardrails": "No doxxing/speculation; No medical/financial advice claims",
+      "content_blocklist": "do not mention the political party or the political approach",
+      "target_readers": "Your existing followers/subs",
+      "reading_experience": "Scannable (short paras, bullets, bold key stats)",
+      "cta": "Specific action (call reps, donate, sign)",
+      "auto_web_search": "Yes, but cap at N sources (N=3)",
+      "web_search_cap": 3,
+      "failure_behavior": "If you can’t verify a number quickly, omit it",
+      "output_format": "Both"
+    },
+    "post_cfg": {
+      "topic": "\"Donald Trump\";\"President Trump\"",
+      "author": "Editorial Desk",
+      "drafting_model": "gpt-4o"
+    },
+    "tweet_cfg": {
+      "topic": "\"Donald Trump\";\"President Trump\"",
+      "author": "Editorial Desk",
+      "max_chars": 280
+    },
+    "podcast_cfg": {
+      "enabled": true,
+      "voice": "Fable",
+      "speed": 2.0,
+      "pitch": 0,
+      "format": "wav",
+      "intro_template": "Welcome to Meerkat Media. Today's podcast is titled {title}.",
+      "signoff": "Thanks for listening to Meerkat Media. Visit our site for full articles and sources. Subscribe for updates and follow us on social.",
+      "direction": "Emphasize dates and figures; steady, authoritative.",
+      "reverb": "subtle"
+    },
+    "video_cfg": {
+      "topic": "\"Donald Trump\";\"President Trump\"",
+      "author": "Editorial Desk",
+      "minutes": 6
+    }
+  }
+}
