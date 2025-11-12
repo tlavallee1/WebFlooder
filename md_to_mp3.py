@@ -16,6 +16,7 @@ Optional knobs:
 """
 
 import os, re, sys, io, argparse, configparser, tempfile, time
+import subprocess, shutil
 from typing import List
 try:
     from openai import OpenAI
@@ -195,7 +196,7 @@ def concat_audio_with_pydub(files: List[str]) -> AudioSegment:
 
 # ------------------------ TTS core ------------------------
 
-def tts_chunk(client: OpenAI, text: str, *, model: str, voice: str, speed: float, fmt: str) -> bytes:
+def tts_chunk(client: OpenAI, text: str, *, model: str, voice: str, speed: float, pitch: int = 0, fmt: str) -> bytes:
     """
     Call OpenAI TTS for one chunk. Returns raw audio bytes in requested format.
     Tries modern arg names first (response_format), falls back if unsupported.
@@ -207,7 +208,8 @@ def tts_chunk(client: OpenAI, text: str, *, model: str, voice: str, speed: float
             voice=voice,
             input=text,
             response_format=fmt,   # <— correct arg name
-            speed=speed            # some SDKs accept this; if not, we'll catch below
+            speed=speed,           # some SDKs accept this; if not, we'll catch below
+            pitch=pitch,
         ) as resp:
             return resp.read()
     except TypeError:
@@ -227,7 +229,8 @@ def tts_chunk(client: OpenAI, text: str, *, model: str, voice: str, speed: float
                 voice=voice,
                 input=text,
                 response_format=fmt,
-                speed=speed
+                speed=speed,
+                pitch=pitch,
             )
         except TypeError:
             resp = client.audio.speech.create(
@@ -261,13 +264,26 @@ def main(argv=None) -> int:
     ap.add_argument("--model", default="gpt-4o-mini-tts", help="OpenAI TTS model (default: gpt-4o-mini-tts)")
     ap.add_argument("--voice", default="alloy", help="Voice name (e.g., alloy, verse, sage)")
     ap.add_argument("--speed", type=float, default=1.0, help="Playback speed (0.5–2.0)")
+    ap.add_argument("--pitch", type=int, default=0, help="Pitch adjustment in semitones (e.g. -4..+4)")
     ap.add_argument("--format", dest="fmt", default="mp3", choices=["mp3","wav","flac","aac","ogg"], help="Audio format")
     ap.add_argument("--max-chars", type=int, default=2800, help="Max chars per TTS chunk")
     ap.add_argument("--no-ssml", action="store_true", help="Disable added pauses/emphasis cues")
     ap.add_argument("--verbose", action="store_true", help="Print extra progress")
     ap.add_argument("--conversational", action="store_true",
                 help="Lightly rewrite text with contractions and casual connectors for more natural speech.")
-    args = ap.parse_args(argv)
+    ap.add_argument("--direction", dest="direction", default=None,
+                help="Short voice direction to influence delivery (e.g. 'calm', 'energetic', or 'speed:1.15 pitch:+2'). "
+                     "Direction will NOT be spoken; it's mapped to prosody overrides.")
+    ap.add_argument("--reverb", dest="reverb", default=None,
+                help="Optional post-process reverb preset (canonical ids: none, large_echo, echo, reverb, subtle, ultra_subtle).")
+    try:
+        args = ap.parse_args(argv)
+    except SystemExit as se:
+        # argparse calls sys.exit() (SystemExit) on parse errors; when invoked
+        # programmatically (from another module) we prefer to return a non-zero
+        # status rather than exiting the whole process. Log and return 2.
+        print(f"ERROR: argument parsing failed: {se}", file=sys.stderr)
+        return 2
 
     in_path = args.in_path
     out_path = args.out_path
@@ -296,7 +312,7 @@ def main(argv=None) -> int:
         log(f"Plain text length: {len(text)} chars")
 
     chunks = chunk_text(text, max_chars=args.max_chars)
-    log(f"Creating TTS for {len(chunks)} chunk(s)… (model={args.model}, voice={args.voice}, speed={args.speed})")
+    log(f"Creating TTS for {len(chunks)} chunk(s)… (model={args.model}, voice={args.voice}, speed={args.speed}, pitch={args.pitch})")
 
     # Generate audio per chunk
     byte_segments: List[bytes] = []
@@ -306,10 +322,64 @@ def main(argv=None) -> int:
     for i, chunk in enumerate(chunks, 1):
         log(f"  [{i}/{len(chunks)}] Synthesizing… {min(len(chunk), 80)} chars preview: {chunk[:80]!r}")
         try:
+            # Interpret direction as prosody overrides rather than spoken text.
+            # Supported presets: calm, friendly, energetic, narration, urgent, relaxed
+            # Also accept explicit overrides like 'speed:1.2' or 'pitch:+2' (space or semicolon separated).
+            def _parse_direction(dir_text: str, base_speed: float, base_pitch: int):
+                if not dir_text:
+                    return base_speed, base_pitch
+                dt = str(dir_text).strip()
+                # simple preset map → (speed, pitch)
+                presets = {
+                    "calm":     (0.92, -1),
+                    "friendly": (1.00, 0),
+                    "energetic":(1.18, +2),
+                    "narration":(1.00, 0),
+                    "urgent":   (1.25, +1),
+                    "relaxed":  (0.9, -2),
+                    "midtempo": (1.0, 0),
+                }
+                # Normalize for simple match
+                key = re.match(r"^([A-Za-z0-9_-]+)", dt)
+                if key:
+                    k = key.group(1).lower()
+                    if k in presets:
+                        return presets[k]
+
+                # Look for explicit numeric overrides like speed:1.15 pitch:+2
+                speed = base_speed
+                pitch = base_pitch
+                # split on semicolon or comma or whitespace
+                parts = re.split(r"[;,\\s]+", dt)
+                for part in parts:
+                    if not part:
+                        continue
+                    m = re.match(r"speed\s*[:=]\s*([0-9]*\.?[0-9]+)", part, flags=re.I)
+                    if m:
+                        try:
+                            speed = float(m.group(1))
+                        except Exception:
+                            pass
+                        continue
+                    m2 = re.match(r"pitch\s*[:=]\s*([+-]?\d+)", part, flags=re.I)
+                    if m2:
+                        try:
+                            pitch = int(m2.group(1))
+                        except Exception:
+                            pass
+                        continue
+                return speed, pitch
+
+            # Compute prosody from direction (does not become part of spoken text)
+            used_speed, used_pitch = _parse_direction(args.direction, args.speed, args.pitch)
+            if used_speed != args.speed or used_pitch != args.pitch:
+                log(f"Direction mapped to prosody: speed={used_speed} pitch={used_pitch}")
+
+            input_for_tts = chunk
             audio_bytes = tts_chunk(
-                client, chunk,
+                client, input_for_tts,
                 model=args.model, voice=args.voice,
-                speed=args.speed, fmt=fmt
+                speed=used_speed, pitch=used_pitch, fmt=fmt
             )
             byte_segments.append(audio_bytes)
             # Also write to temp file so we can optionally pydub-concat
@@ -318,7 +388,11 @@ def main(argv=None) -> int:
             tf.close()
             temp_files.append(tf.name)
         except Exception as e:
+            # Print full traceback to stderr so the caller (GUI or CLI) can inspect the
+            # exact failure point and stack trace. Then cleanup temp files and exit.
+            import traceback
             print(f"ERROR during TTS for chunk {i}: {e}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
             # Best effort: continue or abort? We abort to keep result consistent
             for p in temp_files:
                 try: os.unlink(p)
@@ -348,6 +422,73 @@ def main(argv=None) -> int:
 
     dt = time.time() - t0
     log(f"✅ Wrote: {out_path}  ({len(chunks)} chunk(s), {dt:.1f}s)")
+    # Optionally apply post-process reverb via ffmpeg if requested
+    def _apply_reverb_ffmpeg(path: str, preset_id: str) -> int:
+        if not preset_id:
+            return 0
+        pid = str(preset_id).lower() if preset_id is not None else 'none'
+        if pid in ('', 'none'):
+            return 0
+        # Map canonical id -> ffmpeg aecho filter string
+        preset_map = {
+            'ultra_subtle': "aecho=0.9:0.5:6|18|30:0.12|0.08|0.05, lowpass=f=10000",
+            'subtle':       "aecho=0.95:0.45:10|25|40:0.18|0.12|0.07, lowpass=f=9500",
+            'reverb':       "aecho=0.96:0.5:20|40|60:0.22|0.15|0.1, lowpass=f=9000",
+            'echo':         "aecho=0.9:0.5:120|240:0.35|0.18, lowpass=f=10000",
+            'large_echo':   "aecho=0.9:0.6:200|400:0.5|0.25, lowpass=f=10000",
+        }
+        filt = preset_map.get(pid)
+        if not filt:
+            log(f"Unknown reverb preset id: {preset_id}; skipping reverb")
+            return 0
+
+        if not shutil.which('ffmpeg'):
+            log("ffmpeg not found on PATH; cannot apply reverb. Skipping post-process.")
+            return 0
+
+        root, ext = os.path.splitext(path)
+        # Ensure the temporary output has a standard extension so ffmpeg can choose a muxer
+        tmp_out = f"{root}.reverb_tmp{ext}"
+        cmd = [
+            'ffmpeg', '-y', '-i', path,
+            '-af', filt,
+            tmp_out
+        ]
+        try:
+            log(f"Applying reverb preset '{preset_id}' via ffmpeg…")
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.stdout:
+                print(proc.stdout, end="")
+            if proc.stderr:
+                print(proc.stderr, end="", file=sys.stderr)
+            if proc.returncode != 0:
+                log(f"ffmpeg returned code {proc.returncode}; reverb not applied")
+                try:
+                    if os.path.isfile(tmp_out):
+                        os.unlink(tmp_out)
+                except Exception:
+                    pass
+                return proc.returncode
+            # Replace original file with processed file
+            try:
+                os.replace(tmp_out, path)
+            except Exception as e:
+                log(f"Failed to replace output with reverb-processed file: {e}")
+                return 4
+            log("Reverb applied successfully.")
+            return 0
+        except Exception as e:
+            log(f"Exception while running ffmpeg for reverb: {e}")
+            return 4
+
+    try:
+        if args.reverb:
+            rc_rev = _apply_reverb_ffmpeg(out_path, args.reverb)
+            if rc_rev != 0:
+                # Non-fatal: notify user via stderr and continue
+                print(f"WARNING: reverb application failed with code {rc_rev}", file=sys.stderr)
+    except Exception:
+        pass
     if not _HAVE_PYDUB:
         log("Tip: install pydub + ffmpeg for robust concat:  pip install pydub  (and add ffmpeg to PATH)")
     return 0
